@@ -104,6 +104,46 @@ class SameStateCardSelectGameClient:
         return {"status": "ok"}
 
 
+class DelayedStaleRestSiteGameClient:
+    def __init__(self) -> None:
+        self.read_calls = 0
+        self.actions: list[tuple[str, dict[str, object]]] = []
+        self._post_failed = False
+
+    def get_state(self) -> dict[str, object]:
+        self.read_calls += 1
+        if not self._post_failed:
+            return {
+                "state_type": "rest_site",
+                "rest_site": {
+                    "options": [{"index": 0, "name": "smith"}],
+                    "can_proceed": False,
+                },
+            }
+
+        if self.read_calls < 3:
+            return {
+                "state_type": "rest_site",
+                "rest_site": {
+                    "options": [{"index": 0, "name": "smith"}],
+                    "can_proceed": False,
+                },
+            }
+
+        return {
+            "state_type": "rest_site",
+            "rest_site": {
+                "options": [],
+                "can_proceed": True,
+            },
+        }
+
+    def post_action(self, action: str, **params: object) -> dict[str, object]:
+        self.actions.append((action, dict(params)))
+        self._post_failed = True
+        raise RuntimeError("Action 'choose_rest_option' failed: Rest option index 0 out of range (0 enabled options)")
+
+
 class FakePetClient:
     def __init__(self, modes: list[Mode]) -> None:
         self.statuses = [{"mode": mode.value} for mode in modes]
@@ -583,6 +623,35 @@ def test_auto_mode_replans_card_select_after_successful_pick_even_when_state_sna
         ("select_card", {"index": 2}),
         ("select_card", {"index": 3}),
     ]
+
+
+def test_auto_mode_ignores_delayed_stale_rest_site_error_after_ui_settles() -> None:
+    game_client = DelayedStaleRestSiteGameClient()
+    pet_client = FakePetClient([Mode.AUTO, Mode.AUTO])
+    provider = FakeProvider(
+        plan=ActionPlan(
+            action="choose_rest_option",
+            params={"index": 0},
+            narration_title="Use the campfire",
+            narration_lines=("Upgrade a card first.",),
+        )
+    )
+
+    runner = Runner(
+        OrchestratorConfig(),
+        game_client=game_client,
+        pet_client=pet_client,
+        provider=provider,
+    )
+
+    result = runner.run_once()
+
+    assert result.mode is Mode.AUTO
+    assert result.acted is False
+    assert result.reason == "stale_action_ignored"
+    assert game_client.actions == [("choose_rest_option", {"index": 0})]
+    assert len(pet_client.messages) == 1
+    assert pet_client.messages[0].state == "auto_running"
 
 
 def test_auto_mode_ignores_transient_overlay_state_without_error() -> None:

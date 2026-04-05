@@ -471,21 +471,25 @@ class Runner:
         self._last_auto_action_key = None
 
     def _should_ignore_stale_action_error(self, raw_state_key: str) -> bool:
-        try:
-            latest_state = self._game_client.get_state()
-        except Exception:
-            return False
+        for attempt in range(3):
+            try:
+                latest_state = self._game_client.get_state()
+            except Exception:
+                return False
 
-        latest_raw_state_key = self._state_key(latest_state)
-        if latest_raw_state_key == raw_state_key:
-            return False
+            latest_raw_state_key = self._state_key(latest_state)
+            if latest_raw_state_key != raw_state_key:
+                self._invalidate_auto_plan_cache()
+                self._last_auto_action_key = None
+                self._last_error_key = None
+                self._inferred_card_select_by_raw_state_key.clear()
+                self._debug("stale_action_ignored", attempt=attempt + 1)
+                return True
 
-        self._invalidate_auto_plan_cache()
-        self._last_auto_action_key = None
-        self._last_error_key = None
-        self._inferred_card_select_by_raw_state_key.clear()
-        self._debug("stale_action_ignored")
-        return True
+            if attempt < 2:
+                time.sleep(0.1)
+
+        return False
 
     @staticmethod
     def _required_card_select_count(card_select: Mapping[str, object]) -> int | None:
