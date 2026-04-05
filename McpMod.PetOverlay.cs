@@ -11,10 +11,40 @@ namespace STS2_MCP;
 
 public sealed record PetOverlayMenuItem(PetMode Mode, string Label, bool IsSelected);
 
+public sealed record PetModeAccentSpec(
+    float Red,
+    float Green,
+    float Blue,
+    float OutlineAlpha,
+    float OutlineShadowAlpha,
+    float HaloAlpha,
+    float HaloShadowAlpha,
+    float HaloWidth,
+    float HaloHeight,
+    float HaloOffsetX,
+    float HaloOffsetY,
+    int OutlineTopWidth,
+    int OutlineLeftWidth,
+    int OutlineRightWidth,
+    int OutlineBottomWidth,
+    int OutlineShadowSize,
+    int HaloShadowSize)
+{
+    public static PetModeAccentSpec FromMode(PetMode mode)
+    {
+        return mode switch
+        {
+            PetMode.Pause => new PetModeAccentSpec(0.62f, 0.35f, 0.34f, 0.18f, 0.05f, 0.035f, 0.06f, 56f, 6f, 6f, 70f, 1, 1, 1, 0, 4, 12),
+            PetMode.Advise => new PetModeAccentSpec(0.66f, 0.50f, 0.28f, 0.21f, 0.07f, 0.045f, 0.075f, 58f, 6f, 5f, 70f, 1, 1, 1, 0, 5, 13),
+            PetMode.Auto => new PetModeAccentSpec(0.36f, 0.63f, 0.50f, 0.25f, 0.09f, 0.055f, 0.095f, 60f, 6f, 4f, 70f, 1, 1, 1, 0, 6, 14),
+            _ => new PetModeAccentSpec(0.45f, 0.49f, 0.54f, 0.16f, 0.05f, 0.03f, 0.05f, 56f, 6f, 6f, 70f, 1, 1, 1, 0, 4, 12)
+        };
+    }
+}
+
 public sealed record PetOverlayViewModel(
     PetMode Mode,
     PetVisualState VisualState,
-    string ModeBadgeText,
     string BubbleTitle,
     string BubbleText,
     bool ShowBubble,
@@ -35,7 +65,6 @@ public sealed record PetOverlayViewModel(
         return new PetOverlayViewModel(
             snapshot.Mode,
             snapshot.State,
-            ToModeBadgeText(snapshot.Mode),
             bubbleTitle,
             bubbleText,
             showBubble,
@@ -68,17 +97,6 @@ public sealed record PetOverlayViewModel(
             new PetOverlayMenuItem(PetMode.Pause, "Pause", selectedMode == PetMode.Pause),
             new PetOverlayMenuItem(PetMode.Advise, "Advise", selectedMode == PetMode.Advise),
             new PetOverlayMenuItem(PetMode.Auto, "Auto", selectedMode == PetMode.Auto)
-        };
-    }
-
-    private static string ToModeBadgeText(PetMode mode)
-    {
-        return mode switch
-        {
-            PetMode.Pause => "PAUSE",
-            PetMode.Advise => "ADVISE",
-            PetMode.Auto => "AUTO",
-            _ => "PAUSE"
         };
     }
 }
@@ -329,7 +347,8 @@ internal sealed class PetOverlayController
     private Label? _bubbleBody;
     private PanelContainer? _menuPanel;
     private VBoxContainer? _menuList;
-    private Label? _badgeLabel;
+    private PanelContainer? _petPanel;
+    private PanelContainer? _petHalo;
     private TextureRect? _petSprite;
     private PetOverlayViewModel? _lastViewModel;
 
@@ -373,8 +392,7 @@ internal sealed class PetOverlayController
         if (_menuDismissOverlay != null)
             _menuDismissOverlay.Visible = viewModel.ShowMenu;
 
-        if (_badgeLabel != null)
-            _badgeLabel.Text = viewModel.ModeBadgeText;
+        ApplyModeAccent(viewModel.Mode);
 
         if (_petSprite != null)
             _petSprite.Texture = PetOwlTextureFactory.GetTexture(viewModel.VisualState);
@@ -478,34 +496,35 @@ internal sealed class PetOverlayController
         footer.AddThemeConstantOverride("separation", 8);
         _stack.AddChild(footer);
 
-        var badgePanel = new PanelContainer
+        var petAnchor = new Control
         {
             MouseFilter = Control.MouseFilterEnum.Ignore
         };
-        badgePanel.AddThemeStyleboxOverride("panel", CreatePanelStyle(new Color(0.12f, 0.17f, 0.20f, 0.94f), 14));
-        footer.AddChild(badgePanel);
+        petAnchor.CustomMinimumSize = new Vector2(78, 86);
+        petAnchor.SizeFlagsHorizontal = Control.SizeFlags.ShrinkEnd;
+        petAnchor.SizeFlagsVertical = Control.SizeFlags.ShrinkEnd;
+        footer.AddChild(petAnchor);
 
-        _badgeLabel = new Label();
-        _badgeLabel.AddThemeColorOverride("font_color", new Color(0.82f, 0.95f, 1.0f));
-        badgePanel.AddChild(_badgeLabel);
+        _petHalo = new PanelContainer
+        {
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            Position = new Vector2(9f, 61f),
+            Size = new Vector2(60f, 10f),
+            CustomMinimumSize = new Vector2(60f, 10f),
+            ZIndex = -1
+        };
+        petAnchor.AddChild(_petHalo);
 
-        var petPanel = new PanelContainer
+        _petPanel = new PanelContainer
         {
             MouseFilter = Control.MouseFilterEnum.Stop,
+            Position = new Vector2(5f, 0f),
+            Size = new Vector2(68f, 68f),
             CustomMinimumSize = new Vector2(68, 68),
             MouseDefaultCursorShape = Control.CursorShape.PointingHand
         };
-        petPanel.AddThemeStyleboxOverride(
-            "panel",
-            CreatePanelStyle(
-                new Color(0.16f, 0.13f, 0.10f, 0.96f),
-                28,
-                0,
-                0,
-                0,
-                0));
-        petPanel.GuiInput += OnPetGuiInput;
-        footer.AddChild(petPanel);
+        _petPanel.GuiInput += OnPetGuiInput;
+        petAnchor.AddChild(_petPanel);
 
         _petSprite = new TextureRect
         {
@@ -517,7 +536,9 @@ internal sealed class PetOverlayController
             StretchMode = TextureRect.StretchModeEnum.Scale
         };
         _petSprite.Texture = PetOwlTextureFactory.GetTexture(PetVisualState.Paused);
-        petPanel.AddChild(_petSprite);
+        _petPanel.AddChild(_petSprite);
+
+        ApplyModeAccent(PetMode.Pause);
     }
 
     private void RebuildMenu(PetOverlayViewModel viewModel)
@@ -544,20 +565,21 @@ internal sealed class PetOverlayController
                 ActionMode = BaseButton.ActionModeEnum.Press
             };
             button.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+            var selectedColor = GetSelectedMenuColor(item.Mode);
             button.AddThemeStyleboxOverride(
                 "normal",
                 CreateButtonStyle(item.IsSelected
-                    ? new Color(0.27f, 0.38f, 0.31f, 0.98f)
+                    ? selectedColor
                     : new Color(0.16f, 0.17f, 0.20f, 0.96f)));
             button.AddThemeStyleboxOverride(
                 "hover",
                 CreateButtonStyle(item.IsSelected
-                    ? new Color(0.31f, 0.42f, 0.36f, 0.98f)
+                    ? AdjustColor(selectedColor, 0.04f)
                     : new Color(0.22f, 0.24f, 0.28f, 0.98f)));
             button.AddThemeStyleboxOverride(
                 "pressed",
                 CreateButtonStyle(item.IsSelected
-                    ? new Color(0.22f, 0.34f, 0.28f, 0.98f)
+                    ? AdjustColor(selectedColor, -0.05f)
                     : new Color(0.14f, 0.22f, 0.31f, 0.98f)));
             button.AddThemeColorOverride("font_color", Colors.White);
             button.AddThemeColorOverride("font_hover_color", Colors.White);
@@ -597,6 +619,24 @@ internal sealed class PetOverlayController
         _store.SetMode(mode);
         _store.SetMenuOpen(false);
         Refresh();
+    }
+
+    private void ApplyModeAccent(PetMode mode)
+    {
+        var accent = PetModeAccentSpec.FromMode(mode);
+
+        if (_petPanel != null)
+            _petPanel.AddThemeStyleboxOverride("panel", CreatePetPanelStyle(accent));
+
+        if (_petHalo != null)
+        {
+            _petHalo.Position = new Vector2(
+                39f - accent.HaloWidth * 0.5f + accent.HaloOffsetX,
+                accent.HaloOffsetY);
+            _petHalo.Size = new Vector2(accent.HaloWidth, accent.HaloHeight);
+            _petHalo.CustomMinimumSize = new Vector2(accent.HaloWidth, accent.HaloHeight);
+            _petHalo.AddThemeStyleboxOverride("panel", CreatePetHaloStyle(accent));
+        }
     }
 
     private static StyleBoxFlat CreatePanelStyle(
@@ -640,6 +680,67 @@ internal sealed class PetOverlayController
             ContentMarginTop = 8,
             ContentMarginBottom = 8
         };
+    }
+
+    private static StyleBoxFlat CreatePetPanelStyle(PetModeAccentSpec accent)
+    {
+        return new StyleBoxFlat
+        {
+            BgColor = new Color(0.16f, 0.13f, 0.10f, 0.96f),
+            CornerRadiusTopLeft = 28,
+            CornerRadiusTopRight = 28,
+            CornerRadiusBottomRight = 28,
+            CornerRadiusBottomLeft = 28,
+            ContentMarginLeft = 0,
+            ContentMarginRight = 0,
+            ContentMarginTop = 0,
+            ContentMarginBottom = 0,
+            BorderWidthTop = accent.OutlineTopWidth,
+            BorderWidthLeft = accent.OutlineLeftWidth,
+            BorderWidthRight = accent.OutlineRightWidth,
+            BorderWidthBottom = accent.OutlineBottomWidth,
+            BorderColor = new Color(accent.Red, accent.Green, accent.Blue, accent.OutlineAlpha),
+            ShadowColor = new Color(accent.Red, accent.Green, accent.Blue, accent.OutlineShadowAlpha),
+            ShadowSize = accent.OutlineShadowSize
+        };
+    }
+
+    private static StyleBoxFlat CreatePetHaloStyle(PetModeAccentSpec accent)
+    {
+        return new StyleBoxFlat
+        {
+            BgColor = new Color(accent.Red, accent.Green, accent.Blue, accent.HaloAlpha),
+            CornerRadiusTopLeft = 999,
+            CornerRadiusTopRight = 999,
+            CornerRadiusBottomRight = 999,
+            CornerRadiusBottomLeft = 999,
+            ContentMarginLeft = 0,
+            ContentMarginRight = 0,
+            ContentMarginTop = 0,
+            ContentMarginBottom = 0,
+            ShadowColor = new Color(accent.Red, accent.Green, accent.Blue, accent.HaloShadowAlpha),
+            ShadowSize = accent.HaloShadowSize
+        };
+    }
+
+    private static Color GetSelectedMenuColor(PetMode mode)
+    {
+        return mode switch
+        {
+            PetMode.Pause => new Color(0.37f, 0.20f, 0.20f, 0.98f),
+            PetMode.Advise => new Color(0.40f, 0.29f, 0.16f, 0.98f),
+            PetMode.Auto => new Color(0.18f, 0.31f, 0.25f, 0.98f),
+            _ => new Color(0.26f, 0.28f, 0.32f, 0.98f)
+        };
+    }
+
+    private static Color AdjustColor(Color color, float delta)
+    {
+        return new Color(
+            Mathf.Clamp(color.R + delta, 0f, 1f),
+            Mathf.Clamp(color.G + delta, 0f, 1f),
+            Mathf.Clamp(color.B + delta, 0f, 1f),
+            color.A);
     }
 }
 

@@ -32,7 +32,7 @@ public class PetOverlayViewModelTests
     }
 
     [Fact]
-    public void FromSnapshot_Builds_BadgeBubbleAndMenuState()
+    public void FromSnapshot_Builds_BubbleAndMenuState_WithoutBadgeText()
     {
         var viewModel = PetOverlayViewModel.FromSnapshot(new PetStateSnapshot(
             PetMode.Auto,
@@ -41,7 +41,6 @@ public class PetOverlayViewModelTests
             new[] { "Plan first", "Then act" },
             true));
 
-        Assert.Equal("AUTO", viewModel.ModeBadgeText);
         Assert.Equal("Pet", viewModel.BubbleTitle);
         Assert.Equal("Plan first\nThen act", viewModel.BubbleText);
         Assert.True(viewModel.ShowBubble);
@@ -76,6 +75,32 @@ public class PetOverlayViewModelTests
 
         Assert.True(first.HasEquivalentMenu(second));
         Assert.False(first.HasEquivalentMenu(differentMode));
+    }
+
+    [Fact]
+    public void PetOverlayViewModel_NoLongerExposes_PersistentModeBadgeText()
+    {
+        var property = typeof(PetOverlayViewModel).GetProperty("ModeBadgeText", BindingFlags.Public | BindingFlags.Instance);
+
+        Assert.Null(property);
+    }
+
+    [Fact]
+    public void FromSnapshot_Preserves_SelectedMenuItem_ForActiveMode()
+    {
+        var advise = PetOverlayViewModel.FromSnapshot(new PetStateSnapshot(
+            PetMode.Advise,
+            PetVisualState.Talking,
+            "Hint",
+            new[] { "Block first" },
+            false));
+
+        Assert.False(advise.ShowMenu);
+        Assert.True(advise.ShowBubble);
+        Assert.Equal(PetMode.Advise, advise.Mode);
+        Assert.True(advise.MenuItems[1].IsSelected);
+        Assert.False(advise.MenuItems[0].IsSelected);
+        Assert.False(advise.MenuItems[2].IsSelected);
     }
 
     [Theory]
@@ -114,6 +139,44 @@ public class PetOverlayViewModelTests
         Assert.NotEqual(ReadEnumName(thinking, "WingPose"), ReadEnumName(autoRunning, "WingPose"));
         Assert.True(ReadSingle(thinking, "HeadTilt") < 0f);
         Assert.True(ReadSingle(autoRunning, "BodyLean") > 0f);
+    }
+
+    [Fact]
+    public void PetModeAccentSpec_UsesSoftEllipticalGroundGlow_AndSubtleOutline()
+    {
+        var accent = CreateAccentSpec(PetMode.Advise);
+
+        Assert.InRange(ReadSingle(accent, "OutlineAlpha"), 0.18f, 0.24f);
+        Assert.InRange(ReadSingle(accent, "HaloAlpha"), 0.04f, 0.05f);
+        Assert.True(ReadSingle(accent, "HaloWidth") > ReadSingle(accent, "HaloHeight") * 8f);
+        Assert.True(ReadSingle(accent, "HaloOffsetY") > 50f);
+        Assert.Equal(0, ReadInt32(accent, "OutlineBottomWidth"));
+    }
+
+    [Fact]
+    public void PetModeAccentSpec_KeepsAutoMostReadable_AndPauseMostQuiet()
+    {
+        var pause = CreateAccentSpec(PetMode.Pause);
+        var advise = CreateAccentSpec(PetMode.Advise);
+        var auto = CreateAccentSpec(PetMode.Auto);
+
+        Assert.True(ReadSingle(auto, "OutlineAlpha") > ReadSingle(advise, "OutlineAlpha"));
+        Assert.True(ReadSingle(advise, "OutlineAlpha") > ReadSingle(pause, "OutlineAlpha"));
+        Assert.True(ReadSingle(auto, "HaloAlpha") > ReadSingle(advise, "HaloAlpha"));
+        Assert.True(ReadSingle(advise, "HaloAlpha") > ReadSingle(pause, "HaloAlpha"));
+    }
+
+    private static object CreateAccentSpec(PetMode mode)
+    {
+        var type = typeof(PetOverlayViewModel).Assembly.GetType("STS2_MCP.PetModeAccentSpec");
+        Assert.NotNull(type);
+
+        var factory = type!.GetMethod("FromMode", BindingFlags.Public | BindingFlags.Static);
+        Assert.NotNull(factory);
+
+        var result = factory!.Invoke(null, new object[] { mode });
+        Assert.NotNull(result);
+        return result!;
     }
 
     [Fact]
