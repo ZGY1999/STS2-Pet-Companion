@@ -516,14 +516,15 @@ public static partial class McpMod
 
     private static Dictionary<string, object?> ExecuteSelectCard(Dictionary<string, JsonElement> data)
     {
-        var overlay = NOverlayStack.Instance?.Peek();
+        var gridScreen = ResolveCardGridSelectionScreen();
+        var chooseScreen = ResolveChooseCardSelectionScreen();
 
         if (!data.TryGetValue("index", out var indexElem))
             return Error("Missing 'index' (card index in the grid)");
 
         int index = indexElem.GetInt32();
 
-        if (overlay is NCardGridSelectionScreen gridScreen)
+        if (gridScreen != null)
         {
             var grid = FindFirst<NCardGrid>(gridScreen);
             if (grid == null)
@@ -543,7 +544,7 @@ public static partial class McpMod
                 ["message"] = $"Toggling card selection: {cardName}"
             };
         }
-        else if (overlay is NChooseACardSelectionScreen chooseScreen)
+        else if (chooseScreen != null)
         {
             var holders = FindAllSortedByPosition<NGridCardHolder>(chooseScreen);
             if (index < 0 || index >= holders.Count)
@@ -560,16 +561,16 @@ public static partial class McpMod
             };
         }
 
-        return Error("No card selection screen is open");
+        return Error($"No card selection screen is open ({DescribeCardSelectionSearchState()})");
     }
 
     private static Dictionary<string, object?> ExecuteConfirmSelection()
     {
-        var overlay = NOverlayStack.Instance?.Peek();
-        if (overlay is NChooseACardSelectionScreen)
+        if (ResolveChooseCardSelectionScreen() != null)
             return Error("Choose-a-card screen requires no confirmation — use select_card(index) to pick directly");
-        if (overlay is not NCardGridSelectionScreen screen)
-            return Error("No card selection screen is open");
+        var screen = ResolveCardGridSelectionScreen();
+        if (screen == null)
+            return Error($"No card selection screen is open ({DescribeCardSelectionSearchState()})");
 
         // Check all preview containers (upgrade uses UpgradeSinglePreviewContainer / UpgradeMultiPreviewContainer,
         // NDeckCardSelectScreen uses PreviewContainer with %PreviewConfirm)
@@ -627,10 +628,9 @@ public static partial class McpMod
 
     private static Dictionary<string, object?> ExecuteCancelSelection()
     {
-        var overlay = NOverlayStack.Instance?.Peek();
-
         // Handle choose-a-card screen (skip button)
-        if (overlay is NChooseACardSelectionScreen chooseScreen)
+        var chooseScreen = ResolveChooseCardSelectionScreen();
+        if (chooseScreen != null)
         {
             var skipButton = chooseScreen.GetNodeOrNull<NClickableControl>("SkipButton");
             if (skipButton is { IsEnabled: true })
@@ -645,8 +645,9 @@ public static partial class McpMod
             return Error("No skip option available — a card must be chosen");
         }
 
-        if (overlay is not NCardGridSelectionScreen screen)
-            return Error("No card selection screen is open");
+        var screen = ResolveCardGridSelectionScreen();
+        if (screen == null)
+            return Error($"No card selection screen is open ({DescribeCardSelectionSearchState()})");
 
         // If preview is showing, cancel back to selection
         foreach (var containerName in new[] { "%UpgradeSinglePreviewContainer", "%UpgradeMultiPreviewContainer", "%PreviewContainer" })

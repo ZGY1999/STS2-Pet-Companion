@@ -62,12 +62,14 @@ public static partial class McpMod
         var topOverlay = NOverlayStack.Instance?.Peek();
         var currentRoom = runState.CurrentRoom;
         bool mapIsOpen = NMapScreen.Instance is { IsOpen: true };
-        if (topOverlay is NCardGridSelectionScreen cardSelectScreen)
+        var cardSelectScreen = ResolveCardGridSelectionScreen();
+        var chooseCardScreen = ResolveChooseCardSelectionScreen();
+        if (cardSelectScreen != null)
         {
             result["state_type"] = "card_select";
             result["card_select"] = BuildCardSelectState(cardSelectScreen, runState);
         }
-        else if (topOverlay is NChooseACardSelectionScreen chooseCardScreen)
+        else if (chooseCardScreen != null)
         {
             result["state_type"] = "card_select";
             result["card_select"] = BuildChooseCardState(chooseCardScreen, runState);
@@ -918,13 +920,16 @@ public static partial class McpMod
         // Cards in the grid (sorted by visual position — MoveToFront can reorder children)
         var cardHolders = FindAllSortedByPosition<NGridCardHolder>(screen);
         var cards = new List<Dictionary<string, object?>>();
+        var selectedCards = new List<Dictionary<string, object?>>();
         int index = 0;
         foreach (var holder in cardHolders)
         {
             var card = holder.CardModel;
             if (card == null) continue;
 
-            cards.Add(new Dictionary<string, object?>
+            bool isSelected = TryGetBoolProperty(holder, "is_selected", "selected", "is_ticked", "is_highlighted");
+
+            var cardState = new Dictionary<string, object?>
             {
                 ["index"] = index,
                 ["id"] = card.Id.Entry,
@@ -934,11 +939,27 @@ public static partial class McpMod
                 ["description"] = SafeGetCardDescription(card, PileType.None),
                 ["rarity"] = card.Rarity.ToString(),
                 ["is_upgraded"] = card.IsUpgraded,
+                ["is_selected"] = isSelected,
                 ["keywords"] = BuildHoverTips(card.HoverTips)
-            });
+            };
+            cards.Add(cardState);
+
+            if (isSelected)
+            {
+                selectedCards.Add(new Dictionary<string, object?>
+                {
+                    ["index"] = index,
+                    ["name"] = SafeGetText(() => card.Title)
+                });
+            }
             index++;
         }
         state["cards"] = cards;
+        if (selectedCards.Count > 0)
+        {
+            state["selected_cards"] = selectedCards;
+            state["selected_count"] = selectedCards.Count;
+        }
 
         // Preview container showing? (selection complete, awaiting confirm)
         // Upgrade screens use UpgradeSinglePreviewContainer / UpgradeMultiPreviewContainer

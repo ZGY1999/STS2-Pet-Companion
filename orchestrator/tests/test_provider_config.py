@@ -238,6 +238,34 @@ def test_build_user_prompt_compacts_large_combat_state() -> None:
     assert '"discard_pile_count":22' in prompt
     assert '"hand"' in prompt
     assert '"discard_pile": [' not in prompt
+
+
+def test_build_user_prompt_keeps_full_card_select_grid_for_deck_choices() -> None:
+    snapshot = Snapshot(
+        state_type="card_select",
+        raw_state={
+            "state_type": "card_select",
+            "card_select": {
+                "screen_type": "transform",
+                "prompt": "选择2张牌来变化。",
+                "selected_count": 1,
+                "selected_cards": [{"index": 2, "name": "打击"}],
+                "cards": [
+                    {"index": index, "name": f"Card {index}", "is_selected": index == 2}
+                    for index in range(11)
+                ],
+                "preview_showing": False,
+                "can_confirm": False,
+                "can_cancel": False,
+            },
+        },
+    )
+
+    prompt = _build_user_prompt(snapshot, "auto")
+
+    assert '"selected_count":1' in prompt
+    assert '"selected_cards":[{"index":2,"name":"打击"}]' in prompt
+    assert '"index":10' in prompt
     assert '"battle_log"' not in prompt
 
 

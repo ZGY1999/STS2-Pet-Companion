@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass
 from typing import Any, Mapping
@@ -73,6 +74,7 @@ class Runner:
         self._last_auto_plan: ActionPlan | None = None
         self._last_auto_action_key: str | None = None
         self._last_error_key: str | None = None
+        self._inferred_card_select_by_raw_state_key: dict[str, tuple[int, ...]] = {}
 
     def run_once(self, mode_override: Mode | None = None) -> RunResult:
         mode = self._resolve_mode(mode_override)
@@ -81,17 +83,22 @@ class Runner:
             return RunResult(mode=mode, acted=False, reason="paused")
 
         state_read_started = time.perf_counter()
-        state = self._game_client.get_state()
+        raw_state = self._game_client.get_state()
         self._debug_elapsed("state_read", state_read_started)
+        raw_state_key = self._state_key(raw_state)
+        state = self._apply_inferred_transient_state(raw_state, raw_state_key)
         state_key = self._state_key(state)
         snapshot = self._snapshot_from_game_state(state)
         self._debug("tick", mode=mode.value, state_type=snapshot.state_type)
+
+        if snapshot.state_type != "card_select":
+            self._inferred_card_select_by_raw_state_key.clear()
 
         if mode is Mode.ADVISE:
             return self._run_advise_mode(mode, snapshot, state_key)
 
         if mode is Mode.AUTO:
-            return self._run_auto_mode(mode, snapshot, state_key, mode_override)
+            return self._run_auto_mode(mode, snapshot, state_key, raw_state_key, mode_override)
 
         return RunResult(mode=mode, acted=False, reason="unsupported_mode")
 
@@ -129,6 +136,14 @@ class Runner:
             return self._handle_provider_error(mode, state_key, error)
         self._debug_elapsed("provider_advise", provider_started, state_type=snapshot.state_type, outcome="ok")
 
+        if self._mode_from_status() is not mode:
+            return RunResult(
+                mode=mode,
+                acted=False,
+                stopped_for_mode_change=True,
+                reason="mode_changed_after_provider",
+            )
+
         if advice is None:
             if had_previous_advice:
                 return RunResult(mode=mode, acted=False, reason="advice_refresh_failed")
@@ -152,6 +167,7 @@ class Runner:
         mode: Mode,
         snapshot: Snapshot,
         state_key: str,
+        raw_state_key: str,
         mode_override: Mode | None,
     ) -> RunResult:
         try:
@@ -214,6 +230,8 @@ class Runner:
                 state_type=snapshot.state_type,
                 outcome="error",
             )
+            if self._should_ignore_stale_action_error(raw_state_key):
+                return RunResult(mode=mode, acted=False, reason="stale_action_ignored")
             return self._handle_provider_error(mode, state_key, error)
         self._debug_elapsed(
             "action_post",
@@ -223,6 +241,7 @@ class Runner:
             outcome="ok",
         )
 
+        self._remember_successful_transient_action(snapshot, raw_state_key, plan)
         self._debug("auto_action_ok", action=plan.action, params=dict(plan.params), result=dict(result))
         self._last_auto_action_key = action_key
         return RunResult(mode=mode, acted=True, reason="action_executed")
@@ -385,6 +404,103 @@ class Runner:
             state_type=str(state.get("state_type", "unknown")),
             raw_state=state,
         )
+
+    def _apply_inferred_transient_state(
+        self,
+        raw_state: Mapping[str, object],
+        raw_state_key: str,
+    ) -> Mapping[str, object]:
+        if str(raw_state.get("state_type", "unknown")) != "card_select":
+            return raw_state
+
+        inferred = self._inferred_card_select_by_raw_state_key.get(raw_state_key)
+        if not inferred:
+            return raw_state
+
+        state = json.loads(json.dumps(raw_state, ensure_ascii=False))
+        card_select = state.get("card_select")
+        if not isinstance(card_select, dict):
+            return raw_state
+
+        cards = card_select.get("cards")
+        if isinstance(cards, list):
+            selected_cards: list[dict[str, object]] = []
+            for card in cards:
+                if not isinstance(card, dict):
+                    continue
+                index = card.get("index")
+                is_selected = isinstance(index, int) and index in inferred
+                if is_selected:
+                    card["is_selected"] = True
+                    selected_cards.append({
+                        "index": index,
+                        "name": card.get("name"),
+                    })
+                elif "is_selected" not in card:
+                    card["is_selected"] = False
+
+            card_select["selected_cards"] = selected_cards
+            card_select["selected_count"] = len(selected_cards)
+
+            required = self._required_card_select_count(card_select)
+            if required is not None and len(selected_cards) >= required:
+                card_select["can_confirm"] = bool(card_select.get("can_confirm")) or True
+
+        return state
+
+    def _remember_successful_transient_action(
+        self,
+        snapshot: Snapshot,
+        raw_state_key: str,
+        plan: ActionPlan,
+    ) -> None:
+        if snapshot.state_type != "card_select" or plan.action != "select_card":
+            return
+
+        index = plan.params.get("index")
+        if not isinstance(index, int):
+            return
+
+        existing = self._inferred_card_select_by_raw_state_key.get(raw_state_key, ())
+        if index in existing:
+            return
+
+        self._inferred_card_select_by_raw_state_key[raw_state_key] = (*existing, index)
+        self._last_auto_plan_state_key = None
+        self._last_auto_plan = None
+        self._last_auto_action_key = None
+
+    def _should_ignore_stale_action_error(self, raw_state_key: str) -> bool:
+        try:
+            latest_state = self._game_client.get_state()
+        except Exception:
+            return False
+
+        latest_raw_state_key = self._state_key(latest_state)
+        if latest_raw_state_key == raw_state_key:
+            return False
+
+        self._invalidate_auto_plan_cache()
+        self._last_auto_action_key = None
+        self._last_error_key = None
+        self._inferred_card_select_by_raw_state_key.clear()
+        self._debug("stale_action_ignored")
+        return True
+
+    @staticmethod
+    def _required_card_select_count(card_select: Mapping[str, object]) -> int | None:
+        prompt = card_select.get("prompt")
+        if not isinstance(prompt, str):
+            return None
+
+        match = re.search(r"(\d+)", prompt)
+        if match is None:
+            return None
+
+        try:
+            return int(match.group(1))
+        except ValueError:
+            return None
 
     def _state_key(self, state: Mapping[str, object]) -> str:
         return json.dumps(state, ensure_ascii=False, sort_keys=True, separators=(",", ":"))

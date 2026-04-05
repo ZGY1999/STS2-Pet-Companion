@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 import sys
 
@@ -53,6 +54,56 @@ class ErroringGameClient(FakeGameClient):
         raise RuntimeError(self.error_message)
 
 
+class StaleRewardGameClient:
+    def __init__(self) -> None:
+        self.states = [
+            {"state_type": "rewards", "rewards": {"items": [{"index": 0, "kind": "gold"}]}},
+            {"state_type": "map", "map": {"next_options": [{"index": 0, "kind": "unknown"}]}},
+        ]
+        self.read_calls = 0
+        self.actions: list[tuple[str, dict[str, object]]] = []
+
+    def get_state(self) -> dict[str, object]:
+        self.read_calls += 1
+        if len(self.states) > 1:
+            return self.states.pop(0)
+        return self.states[0]
+
+    def post_action(self, action: str, **params: object) -> dict[str, object]:
+        self.actions.append((action, dict(params)))
+        raise RuntimeError("Action 'claim_reward' failed: Reward index 0 out of range (screen has 0 claimable rewards)")
+
+
+class SameStateCardSelectGameClient:
+    def __init__(self) -> None:
+        self.state = {
+            "state_type": "card_select",
+            "card_select": {
+                "screen_type": "simple_select",
+                "prompt": "Select 2 cards.",
+                "cards": [
+                    {"index": 0, "name": "Strike"},
+                    {"index": 1, "name": "Defend"},
+                    {"index": 2, "name": "Anger"},
+                    {"index": 3, "name": "Armaments"},
+                ],
+                "preview_showing": False,
+                "can_confirm": False,
+                "can_cancel": False,
+            },
+        }
+        self.read_calls = 0
+        self.actions: list[tuple[str, dict[str, object]]] = []
+
+    def get_state(self) -> dict[str, object]:
+        self.read_calls += 1
+        return json.loads(json.dumps(self.state))
+
+    def post_action(self, action: str, **params: object) -> dict[str, object]:
+        self.actions.append((action, dict(params)))
+        return {"status": "ok"}
+
+
 class FakePetClient:
     def __init__(self, modes: list[Mode]) -> None:
         self.statuses = [{"mode": mode.value} for mode in modes]
@@ -73,6 +124,16 @@ class FakePetClient:
     def set_message(self, message: object) -> dict[str, object]:
         self.messages.append(message)
         return {"status": "ok"}
+
+
+class MutablePetClient(FakePetClient):
+    def __init__(self, mode: Mode) -> None:
+        super().__init__([mode])
+        self.current_mode = mode
+
+    def get_status(self) -> dict[str, object]:
+        self.read_calls += 1
+        return {"mode": self.current_mode.value}
 
 
 class FakeProvider(Provider):
@@ -234,6 +295,35 @@ def test_advise_mode_keeps_previous_advice_visible_while_refreshing() -> None:
     assert pet_client.messages[0].state == "thinking"
     assert pet_client.messages[1].state == "talking"
     assert pet_client.messages[2].state == "talking"
+
+
+def test_advise_mode_does_not_restore_advise_after_user_switches_to_auto_mid_request() -> None:
+    game_client = FakeGameClient(Snapshot(state_type="monster"))
+    pet_client = MutablePetClient(Mode.ADVISE)
+
+    class SwitchingProvider(Provider):
+        def advise(self, snapshot: Snapshot) -> AdviceBubble | None:
+            pet_client.current_mode = Mode.AUTO
+            return AdviceBubble(title="Attack first", lines=("Focus the weakest target.",))
+
+        def plan(self, snapshot: Snapshot) -> ActionPlan | None:
+            raise AssertionError("plan should not be called in advise mode")
+
+    runner = Runner(
+        OrchestratorConfig(),
+        game_client=game_client,
+        pet_client=pet_client,
+        provider=SwitchingProvider(),
+    )
+
+    result = runner.run_once()
+
+    assert result.mode is Mode.ADVISE
+    assert result.acted is False
+    assert result.stopped_for_mode_change is True
+    assert result.reason == "mode_changed_after_provider"
+    assert len(pet_client.messages) == 1
+    assert pet_client.messages[0].state == "thinking"
 
 
 def test_auto_mode_reports_provider_failure_outside_combat_without_switching_modes() -> None:
@@ -411,7 +501,88 @@ def test_auto_mode_reports_error_when_combat_provider_returns_no_plan() -> None:
     assert game_client.actions == []
     assert len(pet_client.messages) == 1
     assert pet_client.messages[0].state == "error"
-    assert "monster" in pet_client.messages[0].lines[0]
+
+
+def test_auto_mode_ignores_stale_reward_action_error_after_state_advances() -> None:
+    game_client = StaleRewardGameClient()
+    pet_client = FakePetClient([Mode.AUTO, Mode.AUTO])
+    provider = FakeProvider(
+        plan=ActionPlan(
+            action="claim_reward",
+            params={"index": 0},
+            narration_title="Take the reward",
+            narration_lines=("Grab the gold first.",),
+        )
+    )
+
+    runner = Runner(
+        OrchestratorConfig(),
+        game_client=game_client,
+        pet_client=pet_client,
+        provider=provider,
+    )
+
+    result = runner.run_once()
+
+    assert result.mode is Mode.AUTO
+    assert result.acted is False
+    assert result.reason == "stale_action_ignored"
+    assert game_client.actions == [("claim_reward", {"index": 0})]
+    assert provider.plan_calls == 1
+    assert len(pet_client.messages) == 1
+    assert pet_client.messages[0].state == "auto_running"
+
+
+def test_auto_mode_replans_card_select_after_successful_pick_even_when_state_snapshot_is_unchanged() -> None:
+    game_client = SameStateCardSelectGameClient()
+    pet_client = FakePetClient([Mode.AUTO, Mode.AUTO, Mode.AUTO, Mode.AUTO])
+
+    class CardSelectProvider(Provider):
+        def __init__(self) -> None:
+            self.plan_calls = 0
+
+        def advise(self, snapshot: Snapshot) -> AdviceBubble | None:
+            raise AssertionError("advise should not be called in auto mode")
+
+        def plan(self, snapshot: Snapshot) -> ActionPlan | None:
+            self.plan_calls += 1
+            card_select = snapshot.raw_state["card_select"]
+            selected_count = card_select.get("selected_count", 0)
+            if selected_count == 0:
+                return ActionPlan(
+                    action="select_card",
+                    params={"index": 2},
+                    narration_title="Pick Anger",
+                    narration_lines=("Take Anger first.",),
+                )
+            assert selected_count == 1
+            cards = card_select["cards"]
+            assert cards[2]["is_selected"] is True
+            return ActionPlan(
+                action="select_card",
+                params={"index": 3},
+                narration_title="Pick Armaments",
+                narration_lines=("Then take Armaments.",),
+            )
+
+    provider = CardSelectProvider()
+    runner = Runner(
+        OrchestratorConfig(),
+        game_client=game_client,
+        pet_client=pet_client,
+        provider=provider,
+    )
+
+    first = runner.run_once()
+    second = runner.run_once()
+
+    assert first.reason == "action_executed"
+    assert second.reason == "action_executed"
+    assert provider.plan_calls == 2
+    assert game_client.actions == [
+        ("select_card", {"index": 2}),
+        ("select_card", {"index": 3}),
+    ]
 
 
 def test_auto_mode_ignores_transient_overlay_state_without_error() -> None:

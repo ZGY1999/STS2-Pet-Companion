@@ -1,12 +1,15 @@
 using System;
 using System.Collections.Generic;
 using System.Net;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using Godot;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.HoverTips;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Nodes.Screens.CardSelection;
+using MegaCrit.Sts2.Core.Nodes.Screens.Overlays;
 
 namespace STS2_MCP;
 
@@ -186,5 +189,80 @@ public static partial class McpMod
             if (val != null) return val;
         }
         return null;
+    }
+
+    internal static bool TryGetBoolProperty(GodotObject obj, params string[] propertyNames)
+    {
+        foreach (var propertyName in propertyNames)
+        {
+            try
+            {
+                var value = obj.Get(propertyName);
+                if (value.VariantType == Variant.Type.Bool)
+                    return value.AsBool();
+            }
+            catch
+            {
+                // Ignore unsupported property names and continue probing.
+            }
+        }
+
+        return false;
+    }
+
+    internal static NCardGridSelectionScreen? ResolveCardGridSelectionScreen()
+    {
+        if (NOverlayStack.Instance?.Peek() is NCardGridSelectionScreen overlayScreen
+            && overlayScreen.IsVisibleInTree())
+        {
+            return overlayScreen;
+        }
+
+        return FindLastVisibleInTree<NCardGridSelectionScreen>();
+    }
+
+    internal static NChooseACardSelectionScreen? ResolveChooseCardSelectionScreen()
+    {
+        if (NOverlayStack.Instance?.Peek() is NChooseACardSelectionScreen overlayScreen
+            && overlayScreen.IsVisibleInTree())
+        {
+            return overlayScreen;
+        }
+
+        return FindLastVisibleInTree<NChooseACardSelectionScreen>();
+    }
+
+    private static T? FindLastVisibleInTree<T>() where T : Node
+    {
+        var root = (Engine.GetMainLoop() as SceneTree)?.Root;
+        if (!GodotObject.IsInstanceValid(root))
+            return null;
+
+        return FindAll<T>(root!)
+            .Where(node => node is not CanvasItem canvasItem || canvasItem.IsVisibleInTree())
+            .LastOrDefault();
+    }
+
+    internal static string DescribeCardSelectionSearchState()
+    {
+        var topOverlay = NOverlayStack.Instance?.Peek();
+        string topOverlayType = topOverlay?.GetType().Name ?? "null";
+
+        var root = (Engine.GetMainLoop() as SceneTree)?.Root;
+        if (!GodotObject.IsInstanceValid(root))
+            return $"top_overlay={topOverlayType}, scene_root=null";
+
+        var visibleGridScreens = FindAll<NCardGridSelectionScreen>(root!)
+            .Where(screen => screen.IsVisibleInTree())
+            .Select(screen => screen.GetType().Name)
+            .ToList();
+        var visibleChooseScreens = FindAll<NChooseACardSelectionScreen>(root!)
+            .Where(screen => screen.IsVisibleInTree())
+            .Select(screen => screen.GetType().Name)
+            .ToList();
+
+        string gridText = visibleGridScreens.Count == 0 ? "none" : string.Join(", ", visibleGridScreens);
+        string chooseText = visibleChooseScreens.Count == 0 ? "none" : string.Join(", ", visibleChooseScreens);
+        return $"top_overlay={topOverlayType}, visible_grid_screens={gridText}, visible_choose_screens={chooseText}";
     }
 }

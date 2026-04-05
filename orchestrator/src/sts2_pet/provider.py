@@ -592,6 +592,8 @@ def _compact_list(
 def _list_limit_for_key(key: str) -> int:
     if key == "hand":
         return 10
+    if key == "cards":
+        return 20
     if key == "enemies":
         return 6
     if key == "items":
