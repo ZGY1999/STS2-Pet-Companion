@@ -425,7 +425,7 @@ class ClaudeCliProvider(JsonPromptProvider):
 
 
 def create_default_provider(config: OrchestratorConfig) -> Provider:
-    provider_name = (config.provider_name or "deterministic").strip().lower()
+    provider_name = _resolve_provider_name(config)
     if provider_name == "deterministic":
         return DeterministicProvider()
 
@@ -476,6 +476,23 @@ def create_default_provider(config: OrchestratorConfig) -> Provider:
         )
 
     raise RuntimeError(f"Unknown STS2 pet provider '{config.provider_name}'")
+
+
+def _resolve_provider_name(config: OrchestratorConfig) -> str:
+    provider_name = (config.provider_name or "auto").strip().lower()
+    if provider_name != "auto":
+        return provider_name
+
+    if config.openai_api_key and config.openai_base_url and config.openai_model:
+        return "openai_compatible"
+
+    if config.codex_model:
+        return "codex_cli"
+
+    if config.claude_model:
+        return "claude_cli"
+
+    return "deterministic"
 
 
 def _build_user_prompt(snapshot: Snapshot, mode: str) -> str:

@@ -26,7 +26,7 @@ class OrchestratorConfig:
     timeout_seconds: float = 90.0
     poll_interval_seconds: float = 0.75
     debug_logging: bool = False
-    provider_name: str = "deterministic"
+    provider_name: str = "auto"
     openai_api_key: str | None = None
     openai_base_url: str | None = None
     openai_model: str | None = None

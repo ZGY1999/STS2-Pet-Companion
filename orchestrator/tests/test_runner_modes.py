@@ -391,6 +391,28 @@ def test_auto_mode_normalizes_event_proceed_to_only_unlocked_option() -> None:
     assert result.reason == "action_executed"
     assert game_client.actions == [("choose_event_option", {"index": 2})]
 
+def test_auto_mode_reports_error_when_combat_provider_returns_no_plan() -> None:
+    game_client = FakeGameClient(Snapshot(state_type="monster"))
+    pet_client = FakePetClient([Mode.AUTO, Mode.AUTO])
+    provider = FakeProvider(plan=None)
+
+    runner = Runner(
+        OrchestratorConfig(),
+        game_client=game_client,
+        pet_client=pet_client,
+        provider=provider,
+    )
+
+    result = runner.run_once()
+
+    assert result.mode is Mode.AUTO
+    assert result.acted is False
+    assert result.reason == "provider_error"
+    assert game_client.actions == []
+    assert len(pet_client.messages) == 1
+    assert pet_client.messages[0].state == "error"
+    assert "monster" in pet_client.messages[0].lines[0]
+
 
 def test_auto_mode_ignores_transient_overlay_state_without_error() -> None:
     game_client = FakeGameClient(Snapshot(state_type="overlay"))

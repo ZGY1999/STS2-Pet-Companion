@@ -25,6 +25,18 @@ def test_create_default_provider_uses_deterministic_by_default() -> None:
     assert isinstance(provider, DeterministicProvider)
 
 
+def test_create_default_provider_auto_detects_openai_compatible_from_gateway_config() -> None:
+    provider = create_default_provider(
+        OrchestratorConfig(
+            openai_api_key="test-key",
+            openai_base_url="https://example.test/v1",
+            openai_model="gpt-test",
+        )
+    )
+
+    assert isinstance(provider, OpenAICompatibleProvider)
+
+
 def test_create_default_provider_builds_openai_compatible_provider() -> None:
     provider = create_default_provider(
         OrchestratorConfig(
@@ -161,6 +173,14 @@ def test_cli_accepts_anthropic_provider_choice() -> None:
     assert args.provider == "anthropic_compatible"
 
 
+def test_cli_accepts_auto_provider_choice() -> None:
+    parser = build_parser(OrchestratorConfig())
+
+    args = parser.parse_args(["--provider", "auto"])
+
+    assert args.provider == "auto"
+
+
 def test_cli_accepts_claude_cli_provider_choice() -> None:
     parser = build_parser(OrchestratorConfig())
 
@@ -178,7 +198,7 @@ def test_example_config_file_is_valid_toml() -> None:
 
     config = OrchestratorConfig.from_file(example_path)
 
-    assert config.provider_name == "deterministic"
+    assert config.provider_name == "auto"
     assert config.poll_interval_seconds == 0.75
     assert config.timeout_seconds == 90
 
@@ -450,6 +470,7 @@ def test_deterministic_provider_uses_only_event_option_when_unambiguous() -> Non
     assert plan is not None
     assert plan.action == "choose_event_option"
     assert dict(plan.params) == {"index": 3}
+
 
 
 def test_codex_provider_uses_utf8_stdin(monkeypatch) -> None:

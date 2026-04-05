@@ -30,7 +30,7 @@ def build_parser(base_config: OrchestratorConfig) -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--provider",
-        choices=["deterministic", "openai_compatible", "gateway", "anthropic_compatible", "codex_cli", "claude_cli"],
+        choices=["auto", "deterministic", "openai_compatible", "gateway", "anthropic_compatible", "codex_cli", "claude_cli"],
         default=base_config.provider_name,
     )
     parser.add_argument("--api-key", default=base_config.openai_api_key)

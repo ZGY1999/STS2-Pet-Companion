@@ -1,6 +1,7 @@
-# Copy this file to `sts2_pet.toml` and fill in the provider you want to use.
+# Copy this file to `sts2_pet.toml`. Leave `provider_name = "auto"` to
+# auto-detect a configured AI provider, or set a specific provider explicitly.
 
-provider_name = "deterministic"
+provider_name = "auto"
 poll_interval_seconds = 0.75
 timeout_seconds = 90
 
