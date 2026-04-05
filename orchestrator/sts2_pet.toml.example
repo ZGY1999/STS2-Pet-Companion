@@ -1,0 +1,22 @@
+# Copy this file to `sts2_pet.toml` and fill in the provider you want to use.
+
+provider_name = "deterministic"
+poll_interval_seconds = 0.75
+timeout_seconds = 90
+
+game_base_url = "http://127.0.0.1:15526"
+pet_base_url = "http://127.0.0.1:15526"
+
+[provider]
+# For `openai_compatible` / gateway-style APIs:
+# api_key = "sk-..."
+# base_url = "https://your-gateway.example/v1"
+# model = "gpt-4.1-mini"
+
+# For local Codex CLI:
+# codex_cmd = "codex.cmd"
+# codex_model = "gpt-5-codex"
+
+# For local Claude Code CLI:
+# claude_cmd = "claude"
+# claude_model = "claude-sonnet-4-6"

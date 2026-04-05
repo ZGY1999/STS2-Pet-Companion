@@ -1,0 +1,24 @@
+bin/
+obj/
+out/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+mcp/.venv/
+orchestrator/sts2_pet.toml
+
+# Claude Code
+.claude/
+.mcp.json
+CLAUDE.md
+GUIDE.md
+AGENTS.md
+docs/superpowers/
+.local-archive/
+
+# Qoder
+.qoder.json

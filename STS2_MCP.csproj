@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <OutputType>Library</OutputType>
+    <Nullable>enable</Nullable>
+    <LangVersion>12.0</LangVersion>
+    <!-- Set STS2GameDir explicitly, or export STS2_GAME_DIR before building. -->
+    <STS2GameDir Condition="'$(STS2GameDir)' == ''">$([System.Environment]::GetEnvironmentVariable('STS2_GAME_DIR'))</STS2GameDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="tests\**\*.cs" />
+    <Reference Include="sts2">
+      <HintPath>$(STS2GameDir)\data_sts2_windows_x86_64\sts2.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="GodotSharp">
+      <HintPath>$(STS2GameDir)\data_sts2_windows_x86_64\GodotSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="0Harmony">
+      <HintPath>$(STS2GameDir)\data_sts2_windows_x86_64\0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>
